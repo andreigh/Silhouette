@@ -13,8 +13,7 @@ namespace Silhouette1
         {
             using (Game1 game = new Game1())
             {
-				//WPFWindow w = new WPFWindow();
-				//w.Show();
+				game.form = form;
 				game.Run();
             }
         }

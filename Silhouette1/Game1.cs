@@ -10,6 +10,8 @@ using Microsoft.Xna.Framework.Input;
 using Microsoft.Xna.Framework.Media;
 using Microsoft.Kinect;
 using VideoQuad;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 
 namespace Silhouette1
 {
@@ -38,10 +40,15 @@ namespace Silhouette1
 		float lastzoomdelta = 0;
 		// Texture2D texture;
 		RenderTarget2D texture;
+		public Form1 form;
 
 		public Game1()
 		{
 			graphics = new GraphicsDeviceManager(this);
+			//this.graphics.PreferredBackBufferWidth = 1920;
+			//this.graphics.PreferredBackBufferHeight = 1080;
+			//this.graphics.IsFullScreen = true;
+
 			Content.RootDirectory = "Content";
 		}
 
@@ -110,8 +117,7 @@ namespace Silhouette1
                     new VertexElement(0, VertexElementFormat.Vector3,VertexElementUsage.Position, 0),
                     new VertexElement(12, VertexElementFormat.Vector3,VertexElementUsage.Normal, 0),
                     new VertexElement(24, VertexElementFormat.Vector2,VertexElementUsage.TextureCoordinate,0) 
-                }
-                );
+                });
 
 			this.bodyFrameReader.FrameArrived += this.Reader_FrameArrived;
 		}
@@ -152,7 +158,8 @@ namespace Silhouette1
 		protected override void Update(GameTime gameTime)
 		{
 			// Allows the game to exit
-			if(GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed)
+			KeyboardState keyboardState = Keyboard.GetState();
+			if(keyboardState.IsKeyDown(Keys.Escape))
 				this.Exit();
 
 			// texture.SetData(data);
@@ -181,13 +188,13 @@ namespace Silhouette1
 				pressed = false;
 			}
 
-			worldMatrix = Matrix.CreateScale(w / (float)h * zoom, zoom, 1);
+			worldMatrix = Matrix.CreateScale(w / (float)h * zoom, 1.34f * zoom, 1);
 			worldMatrix = worldMatrix * Matrix.CreateRotationY(rotx);
 			worldMatrix = worldMatrix * Matrix.CreateRotationX(roty);
 
 			float zoomdelta = mouse.ScrollWheelValue / 10000.0f;
 			zoom += zoomdelta - lastzoomdelta;
-			lastzoomdelta = zoomdelta;
+			lastzoomdelta = zoomdelta; 
 
 			base.Update(gameTime);
 		}
@@ -212,12 +219,6 @@ namespace Silhouette1
 
 			GraphicsDevice.Textures[0] = null;
 
-			//for(int i = 0; i < w * h; i++)
-			//	data[i] = (data[i] & 0xFF000000) + ((((data[i] >> 16) & 0xFF)*7/8) << 16) + ((((data[i] >> 8) & 0xFF)*7/8) << 8) + ((((data[i] >> 0) & 0xFF)*7/8) << 0);
-				// data[i] = 0xFF00FF00;
-			// texture.SetData(data);
-			// DrawMarker(data, x, y);
-
 			GraphicsDevice.SetRenderTarget(texture);
 			r = new Rectangle(0, 0, w, h);
 			spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.AlphaBlend);
@@ -231,7 +232,7 @@ namespace Silhouette1
 						foreach( var joint in bodies[i].Joints) {
 							float jx = joint.Value.Position.X;
 							float jy = joint.Value.Position.Y;
-							x = (int)(jx * w/2 + w/2);
+							x = (int)((0.5-jx) * w/2 + w/2);
 							y = (int)((0.1-jy) * h/2 + h/2);
 							DrawMarker(data, x, y);
 
@@ -245,6 +246,16 @@ namespace Silhouette1
 
 			GraphicsDevice.SetRenderTarget(null);
 			texture.GetData(data);
+
+			if(form.bitmap != null) {
+				System.Drawing.Bitmap bitmap = form.bitmap; //new System.Drawing.Bitmap(w, h);
+				BitmapData data = bitmap.LockBits(new System.Drawing.Rectangle(0, 0, w, h), System.Drawing.Imaging.ImageLockMode.ReadOnly, bitmap.PixelFormat);
+				int bufferSize = data.Height * data.Stride;
+				byte[] bytes = new byte[bufferSize];    
+				Marshal.Copy(data.Scan0, bytes, 0, bytes.Length);
+				texture.SetData(bytes);
+				bitmap.UnlockBits(data);
+			}
 
 			GraphicsDevice.Clear(Color.Black);	
 			
