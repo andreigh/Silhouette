@@ -99,7 +99,13 @@
     <Compile Include="Form1.Designer.cs">
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
+    <Compile Include="Ops\VorticityConfinement.cs" />
     <Compile Include="Ops\Advect.cs" />
+    <Compile Include="Ops\Divergence.cs" />
+    <Compile Include="Ops\Gradient.cs" />
+    <Compile Include="Ops\Jacobi.cs" />
+    <Compile Include="Ops\Splat.cs" />
+    <Compile Include="Ops\Vorticity.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Game1.cs" />
