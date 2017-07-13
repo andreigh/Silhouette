@@ -22,7 +22,8 @@ namespace Silhouette1
 	{
 		GraphicsDeviceManager graphics;
 		SpriteBatch spriteBatch;
-		Texture2D textureFade, textureWhite;
+		Texture2D textureFade;
+		public static Texture2D textureWhite;
 		uint[] data;
 		int x, y;
 		int w, h, sw, sh;
@@ -41,6 +42,10 @@ namespace Silhouette1
 		// Texture2D texture;
 		RenderTarget2D texture;
 		public Form1 form;
+		RenderTarget2D density, velocityDivergence, velocityVorticity, pressure;
+		RenderTargetDouble velocity;
+		Effect basic, velocityFx;  
+		int framecount = 0;
 
 		public Game1()
 		{
@@ -111,6 +116,9 @@ namespace Silhouette1
             basicEffect.TextureEnabled = true;
 			basicEffect.Texture = texture;
 
+			basic = Content.Load<Effect>("basic");
+			velocityFx = Content.Load<Effect>("velocity");
+
             // Create a vertex declaration
             vertexDeclaration = new VertexDeclaration(
                 new VertexElement[] {
@@ -118,6 +126,9 @@ namespace Silhouette1
                     new VertexElement(12, VertexElementFormat.Vector3,VertexElementUsage.Normal, 0),
                     new VertexElement(24, VertexElementFormat.Vector2,VertexElementUsage.TextureCoordinate,0) 
                 });
+
+			density = new RenderTarget2D(GraphicsDevice, w, h, false, SurfaceFormat.Color, DepthFormat.None, 0, RenderTargetUsage.PreserveContents);
+			velocity = new RenderTargetDouble(GraphicsDevice, w, h);
 
 			this.bodyFrameReader.FrameArrived += this.Reader_FrameArrived;
 		}
@@ -199,16 +210,6 @@ namespace Silhouette1
 			base.Update(gameTime);
 		}
 
-		private void DrawMarker(uint[] data, int x, int y)
-		{
-			if( x < 0 || y < 0 || x > w-10 || y >= h-10) {
-				return;
-			}
-			for( int i = 0; i < 10; i++)
-				for( int j = 0; j < 10; j++)
-					data[(x+i)+(y+j)*w] = 0xFF00FF00;
-		}
-
 		/// <summary>
 		/// This is called when the game should draw itself.
 		/// </summary>
@@ -217,58 +218,79 @@ namespace Silhouette1
 		{
 			Rectangle r;
 
-			GraphicsDevice.Textures[0] = null;
-
 			GraphicsDevice.SetRenderTarget(texture);
+			DrawBordersMarkers();
+			GraphicsDevice.SetRenderTarget(null);
+
+			if(framecount == 0) {
+				GraphicsDevice.SetRenderTarget(velocity.Write);
+				r = new Rectangle(40, 40, 10, 10);
+				spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque);
+				spriteBatch.Draw(textureWhite, r, Color.White);
+				spriteBatch.End();
+				GraphicsDevice.SetRenderTarget(null);
+			} else {
+				GraphicsDevice.SetRenderTarget(velocity.Write);
+				velocityFx.Parameters["ScreenTexture"].SetValue(velocity.Read);
+				r = new Rectangle(0, 0, w, h);
+				spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque, null, null, null, basic);
+				spriteBatch.Draw(textureWhite, r, Color.White);
+				spriteBatch.End();
+				GraphicsDevice.SetRenderTarget(null);
+			}		   
+			velocity.Swap();
+			framecount++;
+
+			GraphicsDevice.SetRenderTarget(density);
+			basic.Parameters["ScreenTexture"].SetValue(velocity.Read);
 			r = new Rectangle(0, 0, w, h);
-			spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.AlphaBlend);
+			spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque, null, null, null, basic);
 			spriteBatch.Draw(textureFade, r, Color.White);
 			spriteBatch.End();
+			GraphicsDevice.SetRenderTarget(null);
+
+			GraphicsDevice.Textures[0] = null;
+
+			GraphicsDevice.Clear(Color.Black);
+
+			basicEffect.World = worldMatrix;
+			basicEffect.Texture = density;
+
+			// Draw the quad
+			foreach(EffectPass pass in basicEffect.CurrentTechnique.Passes)
+			{
+				pass.Apply();
+				GraphicsDevice.DrawUserIndexedPrimitives<VertexPositionNormalTexture>(PrimitiveType.TriangleList, quad.Vertices, 0, 4, quad.Indexes, 0, 2);
+			}
+
+			base.Draw(gameTime);
+		}
+
+		private void DrawBordersMarkers()
+		{
+			Rectangle r;
+
 			DrawBorders();
 
-			if(bodies != null) {
+			if(bodies != null)
+			{
 				for(int i = 0; i < bodies.Length; i++)
-					if(bodies[i].IsTracked) {
-						foreach( var joint in bodies[i].Joints) {
+					if(bodies[i].IsTracked)
+					{
+						foreach(var joint in bodies[i].Joints)
+						{
 							float jx = joint.Value.Position.X;
 							float jy = joint.Value.Position.Y;
-							x = (int)((0.5-jx) * w/2 + w/2);
-							y = (int)((0.1-jy) * h/2 + h/2);
-							DrawMarker(data, x, y);
+							x = (int)((0.5 - jx) * w / 2 + w / 2);
+							y = (int)((0.1 - jy) * h / 2 + h / 2);
 
-							r = new Rectangle( x, y, 10, 10);
+							r = new Rectangle(x, y, 10, 10);
 							spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque);
 							spriteBatch.Draw(textureWhite, r, Color.White);
 							spriteBatch.End();
 						}
 					}
-			}
-
-			GraphicsDevice.SetRenderTarget(null);
-			texture.GetData(data);
-
-			if(form.bitmap != null) {
-				System.Drawing.Bitmap bitmap = form.bitmap; //new System.Drawing.Bitmap(w, h);
-				BitmapData data = bitmap.LockBits(new System.Drawing.Rectangle(0, 0, w, h), System.Drawing.Imaging.ImageLockMode.ReadOnly, bitmap.PixelFormat);
-				int bufferSize = data.Height * data.Stride;
-				byte[] bytes = new byte[bufferSize];    
-				Marshal.Copy(data.Scan0, bytes, 0, bytes.Length);
-				texture.SetData(bytes);
-				bitmap.UnlockBits(data);
-			}
-
-			GraphicsDevice.Clear(Color.Black);	
-			
-			basicEffect.World = worldMatrix;
-
-            // Draw the quad
-            foreach (EffectPass pass in basicEffect.CurrentTechnique.Passes)
-            {
-                pass.Apply();
-                GraphicsDevice.DrawUserIndexedPrimitives<VertexPositionNormalTexture>(PrimitiveType.TriangleList, quad.Vertices, 0, 4, quad.Indexes, 0, 2);
-            }
-
-			base.Draw(gameTime);
+			}		   
 		}
 
 		private void DrawBorders()
@@ -282,6 +304,6 @@ namespace Silhouette1
 				spriteBatch.Draw(textureWhite, r, Color.White);
 			}
 			spriteBatch.End();
-		}
+		}			   
 	}
 }

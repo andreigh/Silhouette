@@ -13,9 +13,6 @@ namespace Silhouette1
         {
             using (Game1 game = new Game1())
             {
-				Form1 form = new Form1();
-				form.Show();
-				game.form = form;
 				game.Run();
             }
         }
