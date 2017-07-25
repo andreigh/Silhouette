@@ -17,7 +17,7 @@ namespace Silhouette1.Ops
 		public float curl = 0.3f;
 		Effect effect;
 
-		public VorticityConfinement( Effect effect, int w, int h, float timestep, ContentManager Content) {
+		public VorticityConfinement( Effect effect, int w, int h, float timestep) {
 			this.w = w;
 			this.h = h;
 			this.timestep = timestep;
@@ -40,6 +40,7 @@ namespace Silhouette1.Ops
 			spriteBatch.Draw(Game1.textureWhite, r, Color.White);
 			spriteBatch.End();
 			GraphicsDevice.SetRenderTarget(null);
+			output.Swap();
 		}
 	}
 }

@@ -13,7 +13,6 @@ namespace Silhouette1.Ops
 	{
 		public int w, h;
 		Effect splatFx;
-		public float radius = 0.01f;
 
 		public Splat( int w, int h, ContentManager Content) {
 			this.w = w;
@@ -21,7 +20,7 @@ namespace Silhouette1.Ops
 			splatFx = Content.Load<Effect>("splat");
 		}
 
-		public void Render(GraphicsDevice GraphicsDevice, RenderTargetDouble input, Vector3 color, Vector2 point, RenderTargetDouble output) {
+		public void Render(GraphicsDevice GraphicsDevice, RenderTargetDouble input, Vector3 color, Vector2 point, float radius, RenderTargetDouble output) {
 			splatFx.Parameters["read"].SetValue(input.Read);
 			splatFx.Parameters["color"].SetValue(color);
 			splatFx.Parameters["center"].SetValue(point);
@@ -35,6 +34,7 @@ namespace Silhouette1.Ops
 			spriteBatch.Draw(Game1.textureWhite, r, Color.White);
 			spriteBatch.End();
 			GraphicsDevice.SetRenderTarget(null);
+			output.Swap();
 		}
 	}
 }

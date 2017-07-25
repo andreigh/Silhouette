@@ -38,6 +38,7 @@ namespace Silhouette1.Ops
 			spriteBatch.Draw(Game1.textureWhite, r, Color.White);
 			spriteBatch.End();
 			GraphicsDevice.SetRenderTarget(null);
+			output.Swap();
 		}
 	}
 }

@@ -7,12 +7,16 @@ sampler2D p_sampler : register(s1) = sampler_state
 {
 	Texture = <p>;
 	Filter = POINT;
+	AddressU = CLAMP;
+	AddressV = CLAMP;
 };
 
 sampler2D w_sampler : register(s2) = sampler_state
 {
 	Texture = <w>;
 	Filter = POINT;
+	AddressU = CLAMP;
+	AddressV = CLAMP;
 };
 
 float4 PixelShaderFunction(float2 coords: TEXCOORD0) : COLOR0

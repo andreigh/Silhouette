@@ -12,6 +12,7 @@ using Microsoft.Kinect;
 using VideoQuad;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using Silhouette1.Ops;
 
 namespace Silhouette1
 {
@@ -30,26 +31,42 @@ namespace Silhouette1
         private KinectSensor kinectSensor = null;
         private CoordinateMapper coordinateMapper = null;
         private BodyFrameReader bodyFrameReader = null;
+        private DepthFrameReader depthFrameReader = null;
         private Body[] bodies = null;
+		private Body[] lastBodies = null;
         Quad quad;
         VertexDeclaration vertexDeclaration;
         Matrix viewMatrix, projectionMatrix;
         BasicEffect basicEffect;
+		Effect display;
         Matrix worldMatrix;
 		float zoom = 1, rotx = 0, roty = 0, mx, my, lastmx = 0, lastmy = 0;
 		bool pressed = false;
 		float lastzoomdelta = 0;
-		// Texture2D texture;
-		RenderTarget2D texture;
 		public Form1 form;
-		RenderTarget2D density, velocityDivergence, velocityVorticity, pressure;
-		RenderTargetDouble velocity;
-		Effect basic, velocityFx;  
-		int framecount = 0;
+		ushort[] depth;
+		List<Texture2D> depths = new List<Texture2D>();
+		int depthcount = 2;
+
+		float timestep = 1.0f;
+		RenderTargetDouble velocity, density, velocityDivergence, velocityVorticity, pressure;
+		Advect advect;
+		Boundary boundary;
+		Jacobi diffuse;
+		Divergence divergence;
+		Jacobi poissonPressureEq;
+		Gradient gradient;
+		Splat splat;
+		Vorticity vorticity;
+		VorticityConfinement vorticityConfinement;
+		Vector3 source = new Vector3(0.0f, 0.0f, 0.8f);
+        Vector3 ink = new Vector3(0.0f, 0.06f, 0.19f);
+		float hue;
+		float viscosity = 0.8f;
 
 		public Game1()
 		{
-			graphics = new GraphicsDeviceManager(this);
+			graphics = new CustomGraphicsDeviceManager(this);
 			//this.graphics.PreferredBackBufferWidth = 1920;
 			//this.graphics.PreferredBackBufferHeight = 1080;
 			//this.graphics.IsFullScreen = true;
@@ -68,7 +85,8 @@ namespace Silhouette1
 			this.kinectSensor = KinectSensor.GetDefault();
             this.coordinateMapper = this.kinectSensor.CoordinateMapper;
             FrameDescription frameDescription = this.kinectSensor.DepthFrameSource.FrameDescription;
-            this.bodyFrameReader = this.kinectSensor.BodyFrameSource.OpenReader();
+            // this.bodyFrameReader = this.kinectSensor.BodyFrameSource.OpenReader();
+			this.depthFrameReader = this.kinectSensor.DepthFrameSource.OpenReader();
             this.kinectSensor.Open();
 
             quad = new Quad(Vector3.Zero, Vector3.Backward, Vector3.Up, 1, 1);
@@ -105,19 +123,13 @@ namespace Silhouette1
 			textureWhite = new Texture2D(GraphicsDevice, 1, 1);
 			textureWhite.SetData(new uint[] { 0xFFFFFFFF });
 
-			texture = new RenderTarget2D(GraphicsDevice, w, h, false, SurfaceFormat.Color, DepthFormat.None, 0, RenderTargetUsage.PreserveContents);
-			// texture.RenderTargetUsage = RenderTargetUsage.PreserveContents;
-
             // Setup our BasicEffect for drawing the quad
             worldMatrix = Matrix.CreateScale(w / (float)h, 1, 1);
             basicEffect = new BasicEffect(graphics.GraphicsDevice);
             basicEffect.View = viewMatrix;
             basicEffect.Projection = projectionMatrix;
             basicEffect.TextureEnabled = true;
-			basicEffect.Texture = texture;
-
-			basic = Content.Load<Effect>("basic");
-			velocityFx = Content.Load<Effect>("velocity");
+			display = Content.Load<Effect>("basic");
 
             // Create a vertex declaration
             vertexDeclaration = new VertexDeclaration(
@@ -127,29 +139,95 @@ namespace Silhouette1
                     new VertexElement(24, VertexElementFormat.Vector2,VertexElementUsage.TextureCoordinate,0) 
                 });
 
-			density = new RenderTarget2D(GraphicsDevice, w, h, false, SurfaceFormat.Color, DepthFormat.None, 0, RenderTargetUsage.PreserveContents);
 			velocity = new RenderTargetDouble(GraphicsDevice, w, h);
+			density = new RenderTargetDouble(GraphicsDevice, w, h);
+			velocityDivergence = new RenderTargetDouble(GraphicsDevice, w, h);
+			velocityVorticity = new RenderTargetDouble(GraphicsDevice, w, h);
+			pressure = new RenderTargetDouble(GraphicsDevice, w, h);
 
-			this.bodyFrameReader.FrameArrived += this.Reader_FrameArrived;
+			advect = new Advect(w, h, timestep, Content);
+			boundary = new Boundary(w, h, Content);
+			diffuse = new Jacobi(Content.Load<Effect>("jacobivector"), w, h);
+			divergence = new Divergence(w, h, Content);
+			poissonPressureEq = new Jacobi(Content.Load<Effect>("jacobiscalar"), w, h);
+			gradient = new Gradient(w, h, Content);
+			splat = new Splat(w, h, Content);
+			vorticity = new Vorticity(w, h, Content);
+			vorticityConfinement = new VorticityConfinement(Content.Load<Effect>("vorticityforce"), w, h, timestep);
+
+			// this.bodyFrameReader.FrameArrived += this.Reader_FrameArrived;
+			this.depthFrameReader.FrameArrived += DepthFrameReader_FrameArrived;
 		}
 
-        private void Reader_FrameArrived(object sender, BodyFrameArrivedEventArgs e)
-        {
-            using (BodyFrame bodyFrame = e.FrameReference.AcquireFrame())
-            {
-                if (bodyFrame != null)
-                {
-                    if (this.bodies == null)
-                    {
-                        this.bodies = new Body[bodyFrame.BodyCount];
-                    }
+		private void DepthFrameReader_FrameArrived(object sender, DepthFrameArrivedEventArgs e)
+		{
+			using(DepthFrame frame = e.FrameReference.AcquireFrame()) {
+				if(frame != null) {
+					if(depth == null) {
+						depth = new ushort[frame.FrameDescription.LengthInPixels];
+						for(int i = 0; i < depthcount; i++)
+							depths.Add(new Texture2D(GraphicsDevice, frame.FrameDescription.Width, frame.FrameDescription.Height, false, SurfaceFormat.Single));
+					}
+					frame.CopyFrameDataToArray(depth);
+					depths.Insert( 0, depths.Last());
+					depths.RemoveAt(depths.Count-1);
+					float[] fdepth = new float[depth.Length];
+					for(int i = 0; i < depth.Length; i++)
+						fdepth[i] = ((float)depth[i] / frame.DepthMaxReliableDistance);
+					depths[0].SetData(fdepth);
+				}
+			}
+		}
 
-                    // The first time GetAndRefreshBodyData is called, Kinect will allocate each Body in the array.
-                    // As long as those body objects are not disposed and not set to null in the array,
-                    // those body objects will be re-used.
-                    bodyFrame.GetAndRefreshBodyData(this.bodies);
-                }
-            }
+		private void Reader_FrameArrived(object sender, BodyFrameArrivedEventArgs e)
+        {
+			using(BodyFrame bodyFrame = e.FrameReference.AcquireFrame())
+			{
+				if(bodyFrame != null)
+				{
+					if(this.bodies == null)
+					{
+						this.bodies = new Body[bodyFrame.BodyCount];
+						this.lastBodies = new Body[bodyFrame.BodyCount];
+					}
+
+					bodyFrame.GetAndRefreshBodyData(this.bodies);
+					AddForces(this.lastBodies, this.bodies);
+					bodyFrame.GetAndRefreshBodyData(this.lastBodies);
+				}
+			}
+		}
+
+		private void AddForces(Body[] lastBodies, Body[] bodies)
+		{
+			if(lastBodies == null || bodies == null)
+				return;
+
+			for(int i = 0; i < bodies.Length; i++)
+				if(bodies[i].IsTracked && lastBodies[i].IsTracked)
+				{
+					foreach(var joint in bodies[i].Joints)
+						if(joint.Key == JointType.HandLeft)
+						{
+							Vector2 c = ConvertJoint(joint.Value.Position);
+							Joint lastJoint = lastBodies[i].Joints[joint.Key];
+							Vector2 o = ConvertJoint(lastJoint.Position);
+
+							float f = 50.0f;
+							Vector3 force = new Vector3( (c-o)*f, 0.0f);
+							Vector2 point = c;
+
+							this.splat.Render(GraphicsDevice, this.velocity, force, point, 10f, this.velocity);
+							this.boundary.Render(GraphicsDevice, this.velocity, -1, this.velocity);
+							this.splat.Render(GraphicsDevice, this.density, this.source, point, 10f, this.density);
+						}
+				}
+		}  
+
+		Vector2 ConvertJoint(CameraSpacePoint j) {
+			float x = ((0.1f + j.X) * w / 2 + w / 2);
+			float y = ((0.1f - j.Y) * h / 2 + h / 2);
+			return new Vector2(x,y);
 		}
 
 		/// <summary>
@@ -168,44 +246,41 @@ namespace Silhouette1
 		/// <param name="gameTime">Provides a snapshot of timing values.</param>
 		protected override void Update(GameTime gameTime)
 		{
-			// Allows the game to exit
 			KeyboardState keyboardState = Keyboard.GetState();
 			if(keyboardState.IsKeyDown(Keys.Escape))
 				this.Exit();
 
-			// texture.SetData(data);
-
-			var mouse = Mouse.GetState();
-			mx = mouse.X;
-			my = mouse.Y;
-			if(mx >= 0 && mx < sw && my >= 0 && my <= sh) {
-				mx -= sw/2; mx /= sw;
-				my -= sh/2; my /= sh;
-			} else {
-				pressed = false; 
-				mx = my = 0;
-			}
+			//var mouse = Mouse.GetState();
+			//mx = mouse.X;
+			//my = mouse.Y;
+			//if(mx >= 0 && mx < sw && my >= 0 && my <= sh) {
+			//	mx -= sw/2; mx /= sw;
+			//	my -= sh/2; my /= sh;
+			//} else {
+			//	pressed = false; 
+			//	mx = my = 0;
+			//}
 				
-			if (mouse.LeftButton == ButtonState.Pressed) {
-				if (!pressed) {
-					pressed = true;
-					lastmx = mx; lastmy = my;
-				}
-				rotx += (mx - lastmx);
-				roty += (my - lastmy);
-				lastmx = mx; lastmy = my;
-			} else 
-			if (mouse.LeftButton == ButtonState.Released) {
-				pressed = false;
-			}
+			//if (mouse.LeftButton == ButtonState.Pressed) {
+			//	if (!pressed) {
+			//		pressed = true;
+			//		lastmx = mx; lastmy = my;
+			//	}
+			//	rotx += (mx - lastmx);
+			//	roty += (my - lastmy);
+			//	lastmx = mx; lastmy = my;
+			//} else 
+			//if (mouse.LeftButton == ButtonState.Released) {
+			//	pressed = false;
+			//}
 
-			worldMatrix = Matrix.CreateScale(w / (float)h * zoom, 1.34f * zoom, 1);
-			worldMatrix = worldMatrix * Matrix.CreateRotationY(rotx);
-			worldMatrix = worldMatrix * Matrix.CreateRotationX(roty);
+			//worldMatrix = Matrix.CreateScale(w / (float)h * zoom, 1.34f * zoom, 1);
+			//worldMatrix = worldMatrix * Matrix.CreateRotationY(rotx);
+			//worldMatrix = worldMatrix * Matrix.CreateRotationX(roty);
 
-			float zoomdelta = mouse.ScrollWheelValue / 10000.0f;
-			zoom += zoomdelta - lastzoomdelta;
-			lastzoomdelta = zoomdelta; 
+			//float zoomdelta = mouse.ScrollWheelValue / 10000.0f;
+			//zoom += zoomdelta - lastzoomdelta;
+			//lastzoomdelta = zoomdelta; 
 
 			base.Update(gameTime);
 		}
@@ -216,54 +291,105 @@ namespace Silhouette1
 		/// <param name="gameTime">Provides a snapshot of timing values.</param>
 		protected override void Draw(GameTime gameTime)
 		{
-			Rectangle r;
+			var temp = this.advect.dissipation;
+			this.advect.dissipation = 1;
+			this.advect.Render(GraphicsDevice, this.velocity, this.velocity, this.velocity);
+			this.boundary.Render(GraphicsDevice, this.velocity, -1, this.velocity);
 
-			GraphicsDevice.SetRenderTarget(texture);
-			DrawBordersMarkers();
-			GraphicsDevice.SetRenderTarget(null);
+			this.advect.dissipation = temp;
+			this.advect.Render(GraphicsDevice, this.velocity, this.density, this.density);
 
-			if(framecount == 0) {
-				GraphicsDevice.SetRenderTarget(velocity.Write);
-				r = new Rectangle(40, 40, 10, 10);
-				spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque);
-				spriteBatch.Draw(textureWhite, r, Color.White);
-				spriteBatch.End();
-				GraphicsDevice.SetRenderTarget(null);
-			} else {
-				GraphicsDevice.SetRenderTarget(velocity.Write);
-				velocityFx.Parameters["ScreenTexture"].SetValue(velocity.Read);
-				r = new Rectangle(0, 0, w, h);
-				spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque, null, null, null, basic);
-				spriteBatch.Draw(textureWhite, r, Color.White);
-				spriteBatch.End();
-				GraphicsDevice.SetRenderTarget(null);
-			}		   
-			velocity.Swap();
-			framecount++;
+			AddForces();
 
-			GraphicsDevice.SetRenderTarget(density);
-			basic.Parameters["ScreenTexture"].SetValue(velocity.Read);
-			r = new Rectangle(0, 0, w, h);
-			spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque, null, null, null, basic);
-			spriteBatch.Draw(textureFade, r, Color.White);
-			spriteBatch.End();
-			GraphicsDevice.SetRenderTarget(null);
+			// vorticity
+			this.vorticity.Render(GraphicsDevice, this.velocity, this.velocityVorticity);
+			this.vorticityConfinement.Render(GraphicsDevice, this.velocity, this.velocityVorticity, this.velocity);
+			this.boundary.Render(GraphicsDevice, this.velocity, -1, this.velocity);
 
-			GraphicsDevice.Textures[0] = null;
+			//// viscosity
+			this.diffuse.alpha = 1.0f / (this.viscosity * this.timestep);
+			this.diffuse.beta = 4 + this.diffuse.alpha;
+			this.diffuse.Render(GraphicsDevice, this.velocity, this.velocity, this.velocity, this.boundary, -1);
+
+			Project();
 
 			GraphicsDevice.Clear(Color.Black);
 
-			basicEffect.World = worldMatrix;
-			basicEffect.Texture = density;
+			//basicEffect.World = worldMatrix;
+			//basicEffect.Texture = velocity.Read;
 
 			// Draw the quad
-			foreach(EffectPass pass in basicEffect.CurrentTechnique.Passes)
-			{
-				pass.Apply();
-				GraphicsDevice.DrawUserIndexedPrimitives<VertexPositionNormalTexture>(PrimitiveType.TriangleList, quad.Vertices, 0, 4, quad.Indexes, 0, 2);
+			//foreach(EffectPass pass in basicEffect.CurrentTechnique.Passes)
+			//{
+			//	pass.Apply();
+			//	GraphicsDevice.DrawUserIndexedPrimitives<VertexPositionNormalTexture>(PrimitiveType.TriangleList, quad.Vertices, 0, 4, quad.Indexes, 0, 2);
+			//}
+
+			display.Parameters["ScreenTexture"].SetValue(density.Read);
+			if(depths.Count > 0) {
+				display.Parameters["DepthTexture"].SetValue(depths[0]);
+				display.Parameters["DepthTextureOld"].SetValue(depths[depths.Count-1]);
+				display.Parameters["DepthSize"].SetValue(new Vector2(depths[0].Width, depths[0].Height));
 			}
 
+			Matrix projection = Matrix.CreateOrthographicOffCenter(0, 
+					GraphicsDevice.Viewport.Width, GraphicsDevice.Viewport.Height, 0, 0, 1);
+			Matrix halfPixelOffset = Matrix.CreateTranslation(-0.5f, -0.5f, 0);
+			display.Parameters["MatrixTransform"].SetValue(halfPixelOffset * projection);
+
+			SpriteBatch spriteBatch = new SpriteBatch(GraphicsDevice);
+			Rectangle r = new Rectangle(0, 0, w, h);
+			spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque, null, null, null, display);
+			spriteBatch.Draw(textureWhite, r, Color.White);
+			spriteBatch.End();
+
+			GraphicsDevice.Textures[2] = null;
+			GraphicsDevice.Textures[3] = null;
+
 			base.Draw(gameTime);
+		}
+
+		private void Project()
+		{
+            this.divergence.Render(GraphicsDevice,this.velocity,this.velocityDivergence);
+
+			// 0 is our initial guess for the poisson equation solver
+			GraphicsDevice.SetRenderTarget(pressure.Write);
+			GraphicsDevice.Clear(Color.Black);
+			GraphicsDevice.SetRenderTarget(null);
+			pressure.Swap();
+
+			this.poissonPressureEq.alpha = -1.0f * 1.0f;
+            this.poissonPressureEq.Render(GraphicsDevice,this.pressure,this.velocityDivergence,this.pressure,this.boundary,1.0f);
+
+            this.gradient.Render(this.GraphicsDevice,this.pressure,this.velocity,this.velocity);
+            this.boundary.Render(GraphicsDevice, this.velocity, -1, this.velocity);
+		}
+
+		private void AddForces()
+		{
+			float f = 1000f;
+			MouseState state = Mouse.GetState();
+			if (state.X != lastmx || state.Y != lastmy) {
+				if(state.LeftButton == ButtonState.Pressed) {
+					Vector2 point = new Vector2((float)lastmx, (float)lastmy);
+					Vector3 force = new Vector3((float)(state.X-lastmx) / w * f, (float)(state.Y-lastmy) / h * f, 0.0f);
+					this.splat.Render(GraphicsDevice, this.velocity, force, point, 200f, this.velocity);
+					this.boundary.Render(GraphicsDevice, this.velocity, -1, this.velocity);
+				}
+				if(state.RightButton == ButtonState.Pressed) {
+					Vector2 point = new Vector2((float)state.X, (float)state.Y);
+					this.splat.Render(GraphicsDevice, this.density, this.source, point, 200f, this.density);
+				}
+			}
+			lastmx = state.X;
+			lastmy = state.Y;
+			System.Drawing.Color color = (System.Drawing.Color)new HSLColor(hue,1.0,0.5); 
+			this.source = new Vector3( color.R / 255.0f, color.G / 255.0f, color.B / 255.0f);
+			hue += 0.01f;
+			if(hue > 1.0) {
+				hue = 0.0f;
+			}
 		}
 
 		private void DrawBordersMarkers()

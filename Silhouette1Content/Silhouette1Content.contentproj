@@ -37,13 +37,6 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="velocity.fx">
-      <Name>velocity</Name>
-      <Importer>EffectImporter</Importer>
-      <Processor>EffectProcessor</Processor>
-    </Compile>
-  </ItemGroup>
-  <ItemGroup>
     <Compile Include="advect.fx">
       <Name>advect</Name>
       <Importer>EffectImporter</Importer>
@@ -98,6 +91,29 @@
       <Importer>EffectImporter</Importer>
       <Processor>EffectProcessor</Processor>
     </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="boundary.fx">
+      <Name>boundary</Name>
+      <Importer>EffectImporter</Importer>
+      <Processor>EffectProcessor</Processor>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Common.fxh">
+      <Name>Common</Name>
+    </Content>
+    <Content Include="Lighting.fxh">
+      <Name>Lighting</Name>
+    </Content>
+    <Content Include="Macros.fxh">
+      <Name>Macros</Name>
+      <Importer>EffectImporter</Importer>
+      <Processor>EffectProcessor</Processor>
+    </Content>
+    <Content Include="Structures.fxh">
+      <Name>Structures</Name>
+    </Content>
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\Microsoft\XNA Game Studio\$(XnaFrameworkVersion)\Microsoft.Xna.GameStudio.ContentPipeline.targets" />
   <!--  To modify your build process, add your task inside one of the targets below and uncomment it. 

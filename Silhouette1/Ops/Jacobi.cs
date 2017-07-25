@@ -16,13 +16,13 @@ namespace Silhouette1.Ops
 		public float alpha = -1, beta = 4;
 		int iterations = 50;
 
-		public Jacobi( Effect effect, int w, int h, ContentManager Content) {
+		public Jacobi( Effect effect, int w, int h) {
 			this.w = w;
 			this.h = h;
 			jacobiFx = effect;
 		}
 
-		public void Render(GraphicsDevice GraphicsDevice, RenderTargetDouble x, RenderTargetDouble b, RenderTargetDouble output) {
+		public void Render(GraphicsDevice GraphicsDevice, RenderTargetDouble x, RenderTargetDouble b, RenderTargetDouble output, Boundary boundary, float scale) {
 			for (var i = 0; i < iterations; i++) {
 				jacobiFx.Parameters["x"].SetValue(x.Read);
 				jacobiFx.Parameters["b"].SetValue(b.Read);
@@ -37,6 +37,9 @@ namespace Silhouette1.Ops
 				spriteBatch.Draw(Game1.textureWhite, r, Color.White);
 				spriteBatch.End();
 				GraphicsDevice.SetRenderTarget(null);
+				output.Swap();
+
+				boundary.Render(GraphicsDevice, output, scale, output);
 			}
 		}
 	}

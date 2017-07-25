@@ -1,8 +1,7 @@
 texture read;
 float2 gridSize;
-float3 color;
-float2 center;
-float radius;
+float2 gridOffset;
+float scale;
 
 sampler2D read_sampler : register(s1) = sampler_state
 {
@@ -12,18 +11,10 @@ sampler2D read_sampler : register(s1) = sampler_state
 	AddressV = CLAMP;
 };
 
-float gauss(float2 p, float r)
-{
-	return exp(-dot(p, p) / r);
-}
-
 float4 PixelShaderFunction(float2 coords: TEXCOORD0) : COLOR0
 {
-	float2 uv = coords;
-	float3 base = tex2D(read_sampler, uv).xyz;
-	float2 coord = center.xy - uv * gridSize;
-	float3 splat = color * gauss(coord, radius);
-	return float4(base + splat, 1.0);
+	float2 uv = coords + gridOffset.xy / gridSize.xy;
+	return float4(scale * tex2D(read_sampler, uv).xyz, 1.0);
 }
 
 technique Technique1

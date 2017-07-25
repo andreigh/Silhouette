@@ -10,12 +10,16 @@ sampler2D vorticity_sampler : register(s1) = sampler_state
 {
 	Texture = <vorticity>;
 	Filter = POINT;
+	AddressU = CLAMP;
+	AddressV = CLAMP;
 };
 
 sampler2D velocity_sampler : register(s2) = sampler_state
 {
 	Texture = <velocity>;
 	Filter = POINT;
+	AddressU = CLAMP;
+	AddressV = CLAMP;
 };
 
 float4 PixelShaderFunction(float2 coords: TEXCOORD0) : COLOR0

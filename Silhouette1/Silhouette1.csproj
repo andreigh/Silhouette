@@ -93,12 +93,15 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ArcBallCamera.cs" />
+    <Compile Include="CustomGraphicsDeviceManager.cs" />
     <Compile Include="Form1.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Form1.Designer.cs">
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
+    <Compile Include="HSLColor.cs" />
+    <Compile Include="Ops\Boundary.cs" />
     <Compile Include="Ops\VorticityConfinement.cs" />
     <Compile Include="Ops\Advect.cs" />
     <Compile Include="Ops\Divergence.cs" />
