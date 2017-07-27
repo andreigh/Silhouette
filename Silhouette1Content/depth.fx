@@ -1,18 +1,28 @@
-texture SourceTexture;
+texture Velocity;
+texture Density;
 texture DepthTexture;
 texture DepthTextureOld;
 float2 DepthSize;
 float4x4 MatrixTransform;
+float3 Color;
 
-sampler SourceT : register(s1) = sampler_state
+sampler SourceV : register(s1) = sampler_state
 {
-	Texture = <SourceTexture>;
+	Texture = <Velocity>;
 	Filter = POINT;
 	AddressU = CLAMP;
 	AddressV = CLAMP;
 };
 
-sampler DepthT : register(s2) = sampler_state
+sampler SourceD : register(s2) = sampler_state
+{
+	Texture = <Density>;
+	Filter = POINT;
+	AddressU = CLAMP;
+	AddressV = CLAMP;
+};
+
+sampler DepthT : register(s3) = sampler_state
 {
 	Texture = <DepthTexture>;
 	Filter = POINT;
@@ -20,7 +30,7 @@ sampler DepthT : register(s2) = sampler_state
 	AddressV = CLAMP;
 };
 
-sampler DepthT2 : register(s3) = sampler_state
+sampler DepthT2 : register(s4) = sampler_state
 {
 	Texture = <DepthTextureOld>;
 	Filter = POINT;
@@ -28,16 +38,26 @@ sampler DepthT2 : register(s3) = sampler_state
 	AddressV = CLAMP;
 };
 
-float4 PixelShaderFunction(float2 coords: TEXCOORD0) : COLOR0
+struct PSOutput {
+	float4 V : COLOR0;
+	float4 D : COLOR1;
+};
+
+PSOutput PixelShaderFunction(float2 coords: TEXCOORD0) : COLOR0
 {
-	float4 initial = tex2D(SourceT, coords);
-	float2 uv = coords * DepthSize;
-	float depth = tex2D(DepthT, coords);
-	float depthOld = tex2D(DepthT2, coords);
+	PSOutput output;
+	float2 crd = float2(1-coords.x, coords.y);
+	output.V = tex2D(SourceV, coords);
+	output.D = tex2D(SourceD, coords);
+	float depth = tex2D(DepthT, crd);
+	float depthOld = tex2D(DepthT2, crd);
 	float z = depth - depthOld + 0.5;
+	//output.D = float4(z, z, z, 1);
+	//return output;
 	if (abs(z-0.5) < 0.1) {
-		return initial;
+		return output;
 	}
+	float2 uv = crd * DepthSize;
 	int c = 0, c1 = 0, c2 = 0;
 	float2 vel = float2(0, 0);
 	for (int i = -10; i < 10; i++)
@@ -56,17 +76,17 @@ float4 PixelShaderFunction(float2 coords: TEXCOORD0) : COLOR0
 			}
 		}
 	if (c1 > 300 || c2 > 50) {
-		return initial;
+		return output;
 	}
+	output.D = float4(Color, 1);
 	if (z >= 0.8) {
 		if (c > 0) {
 			vel /= c;
-			vel = vel / float2(20, 20);
-			return initial + float4(vel, 0, 0);
-//			return float4(vel, 0, 1);
+			// vel = vel / float2(5, 5);
+			output.V += float4(vel, 0, 0);
 		}
 	}
-	return initial;
+	return output;
 }
 
 void SpriteVertexShader(inout float4 color : COLOR0,

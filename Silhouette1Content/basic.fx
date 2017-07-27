@@ -11,7 +11,7 @@ sampler ScreenS : register(s1) = sampler_state
 
 float4 PixelShaderFunction(float2 coords: TEXCOORD0) : COLOR0
 {
-//	float4 color = float4(0.5,0.5,0.5,0.0) + float4(0.5,0.5,0.5,1.0) * tex2D(ScreenS, coords);
+// 	float4 color = float4(0.5,0.5,0.5,0.0) + float4(0.5,0.5,0.5,1.0) * tex2D(ScreenS, coords);
 	float4 color = tex2D(ScreenS, coords);
 	return color;
 }

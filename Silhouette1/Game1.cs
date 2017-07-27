@@ -59,16 +59,15 @@ namespace Silhouette1
 		Vorticity vorticity;
 		VorticityConfinement vorticityConfinement;
 		Vector3 source = new Vector3(0.0f, 0.0f, 0.8f);
-        Vector3 ink = new Vector3(0.0f, 0.06f, 0.19f);
 		float hue;
 		float viscosity = 0.8f;
 
 		public Game1()
 		{
 			graphics = new CustomGraphicsDeviceManager(this);
-			this.graphics.PreferredBackBufferWidth = 1280;
-			this.graphics.PreferredBackBufferHeight = 720;
-			this.graphics.IsFullScreen = true;
+			//this.graphics.PreferredBackBufferWidth = 1280;
+			//this.graphics.PreferredBackBufferHeight = 720;
+			//this.graphics.IsFullScreen = true;
 
 			Content.RootDirectory = "Content";
 		}
@@ -83,10 +82,6 @@ namespace Silhouette1
 		{
 			this.kinectSensor = KinectSensor.GetDefault();
             this.coordinateMapper = this.kinectSensor.CoordinateMapper;
-            FrameDescription frameDescription = this.kinectSensor.DepthFrameSource.FrameDescription;
-            this.bodyFrameReader = this.kinectSensor.BodyFrameSource.OpenReader();
-			// this.depthFrameReader = this.kinectSensor.DepthFrameSource.OpenReader();
-            this.kinectSensor.Open();
 
             quad = new Quad(Vector3.Zero, Vector3.Backward, Vector3.Up, 1, 1);
             viewMatrix = Matrix.CreateLookAt(new Vector3(0, 0, 2),
@@ -157,8 +152,11 @@ namespace Silhouette1
 			vorticity = new Vorticity(w, h, Content);
 			vorticityConfinement = new VorticityConfinement(Content.Load<Effect>("vorticityforce"), w, h, timestep);
 
-			this.bodyFrameReader.FrameArrived += this.Reader_FrameArrived;
-			// this.depthFrameReader.FrameArrived += DepthFrameReader_FrameArrived;
+            // this.bodyFrameReader = this.kinectSensor.BodyFrameSource.OpenReader();
+			this.depthFrameReader = this.kinectSensor.DepthFrameSource.OpenReader();
+            this.kinectSensor.Open();
+			// this.bodyFrameReader.FrameArrived += this.Reader_FrameArrived;
+			this.depthFrameReader.FrameArrived += DepthFrameReader_FrameArrived;
 		}
 
 		private void DepthFrameReader_FrameArrived(object sender, DepthFrameArrivedEventArgs e)
@@ -173,15 +171,16 @@ namespace Silhouette1
 					{
 						depth = new ushort[frame.FrameDescription.LengthInPixels];
 						for(int i = 0; i < depthcount; i++)
-							depths.Add(new Texture2D(GraphicsDevice, frame.FrameDescription.Width, frame.FrameDescription.Height, false, SurfaceFormat.Single));
+							depths.Add(new Texture2D(GraphicsDevice, frame.FrameDescription.Width, frame.FrameDescription.Height, false, SurfaceFormat.Bgra4444));
 					}
 					frame.CopyFrameDataToArray(depth);
 					depths.Insert(0, depths.Last());
 					depths.RemoveAt(depths.Count - 1);
-					float[] fdepth = new float[depth.Length];
-					for(int i = 0; i < depth.Length; i++)
-						fdepth[i] = ((float)depth[i] / frame.DepthMaxReliableDistance);
-					depths[0].SetData(fdepth);
+					//float[] fdepth = new float[depth.Length];
+					//for(int i = 0; i < depth.Length; i++)
+					//	fdepth[i] = ((float)depth[i] / frame.DepthMaxReliableDistance);
+					//depths[0].SetData(fdepth);
+					depths[0].SetData(depth);
 					depthframecount++;
 				}
 			}
@@ -191,21 +190,24 @@ namespace Silhouette1
 		{
 			if(depthframecount > depthcount)
 			{
-				depthEffect.Parameters["SourceTexture"].SetValue(velocity.Read);
+				depthEffect.Parameters["Velocity"].SetValue(velocity.Read);
+				depthEffect.Parameters["Density"].SetValue(density.Read);
 				depthEffect.Parameters["DepthTexture"].SetValue(depths[0]);
 				depthEffect.Parameters["DepthTextureOld"].SetValue(depths[depths.Count - 1]);
 				depthEffect.Parameters["DepthSize"].SetValue(new Vector2(depths[0].Width, depths[0].Height));
+				depthEffect.Parameters["Color"].SetValue(this.source);
 
 				SpriteBatch spriteBatch = new SpriteBatch(GraphicsDevice);
 				Rectangle r = new Rectangle(0, 0, w, h);
 
 				// update velocity with depth info
-				GraphicsDevice.SetRenderTarget(velocity.Write);
+				GraphicsDevice.SetRenderTargets(new RenderTargetBinding[] { new RenderTargetBinding(velocity.Write), new RenderTargetBinding(density.Write) });
 				spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque, null, null, null, depthEffect);
 				spriteBatch.Draw(Game1.textureWhite, r, Color.White);
 				spriteBatch.End();
 				GraphicsDevice.SetRenderTarget(null);
 				velocity.Swap();
+				density.Swap();
 			}
 		}
 
@@ -324,7 +326,7 @@ namespace Silhouette1
 			this.advect.dissipation = temp;
 			this.advect.Render(GraphicsDevice, this.velocity, this.density, this.density);
 
-			// AddForcesFromDepthFrame();
+			AddForcesFromDepthFrame();
 			AddForcesFromMouse();
 			AddForcesFromBodies();
 
@@ -363,6 +365,7 @@ namespace Silhouette1
 
 			GraphicsDevice.Textures[2] = null;
 			GraphicsDevice.Textures[3] = null;
+			GraphicsDevice.Textures[4] = null;
 
 			ChangeColor();
 
