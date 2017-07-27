@@ -37,8 +37,7 @@ namespace Silhouette1
         Quad quad;
         VertexDeclaration vertexDeclaration;
         Matrix viewMatrix, projectionMatrix;
-        BasicEffect basicEffect;
-		Effect display;
+		Effect display, depthEffect;
         Matrix worldMatrix;
 		float zoom = 1, rotx = 0, roty = 0, mx, my, lastmx = 0, lastmy = 0;
 		bool pressed = false;
@@ -46,7 +45,7 @@ namespace Silhouette1
 		public Form1 form;
 		ushort[] depth;
 		List<Texture2D> depths = new List<Texture2D>();
-		int depthcount = 2;
+		int depthcount = 2, depthframecount = 0;
 
 		float timestep = 1.0f;
 		RenderTargetDouble velocity, density, velocityDivergence, velocityVorticity, pressure;
@@ -67,9 +66,9 @@ namespace Silhouette1
 		public Game1()
 		{
 			graphics = new CustomGraphicsDeviceManager(this);
-			//this.graphics.PreferredBackBufferWidth = 1920;
-			//this.graphics.PreferredBackBufferHeight = 1080;
-			//this.graphics.IsFullScreen = true;
+			this.graphics.PreferredBackBufferWidth = 1280;
+			this.graphics.PreferredBackBufferHeight = 720;
+			this.graphics.IsFullScreen = true;
 
 			Content.RootDirectory = "Content";
 		}
@@ -85,8 +84,8 @@ namespace Silhouette1
 			this.kinectSensor = KinectSensor.GetDefault();
             this.coordinateMapper = this.kinectSensor.CoordinateMapper;
             FrameDescription frameDescription = this.kinectSensor.DepthFrameSource.FrameDescription;
-            // this.bodyFrameReader = this.kinectSensor.BodyFrameSource.OpenReader();
-			this.depthFrameReader = this.kinectSensor.DepthFrameSource.OpenReader();
+            this.bodyFrameReader = this.kinectSensor.BodyFrameSource.OpenReader();
+			// this.depthFrameReader = this.kinectSensor.DepthFrameSource.OpenReader();
             this.kinectSensor.Open();
 
             quad = new Quad(Vector3.Zero, Vector3.Backward, Vector3.Up, 1, 1);
@@ -125,11 +124,14 @@ namespace Silhouette1
 
             // Setup our BasicEffect for drawing the quad
             worldMatrix = Matrix.CreateScale(w / (float)h, 1, 1);
-            basicEffect = new BasicEffect(graphics.GraphicsDevice);
-            basicEffect.View = viewMatrix;
-            basicEffect.Projection = projectionMatrix;
-            basicEffect.TextureEnabled = true;
 			display = Content.Load<Effect>("basic");
+			depthEffect = Content.Load<Effect>("depth");
+
+			Matrix projection = Matrix.CreateOrthographicOffCenter(0, 
+					GraphicsDevice.Viewport.Width, GraphicsDevice.Viewport.Height, 0, 0, 1);
+			Matrix halfPixelOffset = Matrix.CreateTranslation(-0.5f, -0.5f, 0);
+			display.Parameters["MatrixTransform"].SetValue(halfPixelOffset * projection);
+			depthEffect.Parameters["MatrixTransform"].SetValue(halfPixelOffset * projection);
 
             // Create a vertex declaration
             vertexDeclaration = new VertexDeclaration(
@@ -155,27 +157,55 @@ namespace Silhouette1
 			vorticity = new Vorticity(w, h, Content);
 			vorticityConfinement = new VorticityConfinement(Content.Load<Effect>("vorticityforce"), w, h, timestep);
 
-			// this.bodyFrameReader.FrameArrived += this.Reader_FrameArrived;
-			this.depthFrameReader.FrameArrived += DepthFrameReader_FrameArrived;
+			this.bodyFrameReader.FrameArrived += this.Reader_FrameArrived;
+			// this.depthFrameReader.FrameArrived += DepthFrameReader_FrameArrived;
 		}
 
 		private void DepthFrameReader_FrameArrived(object sender, DepthFrameArrivedEventArgs e)
 		{
 			using(DepthFrame frame = e.FrameReference.AcquireFrame()) {
-				if(frame != null) {
-					if(depth == null) {
+				if(frame != null)
+				{
+					GraphicsDevice.Textures[2] = null;
+					GraphicsDevice.Textures[3] = null;
+
+					if(depth == null)
+					{
 						depth = new ushort[frame.FrameDescription.LengthInPixels];
 						for(int i = 0; i < depthcount; i++)
 							depths.Add(new Texture2D(GraphicsDevice, frame.FrameDescription.Width, frame.FrameDescription.Height, false, SurfaceFormat.Single));
 					}
 					frame.CopyFrameDataToArray(depth);
-					depths.Insert( 0, depths.Last());
-					depths.RemoveAt(depths.Count-1);
+					depths.Insert(0, depths.Last());
+					depths.RemoveAt(depths.Count - 1);
 					float[] fdepth = new float[depth.Length];
 					for(int i = 0; i < depth.Length; i++)
 						fdepth[i] = ((float)depth[i] / frame.DepthMaxReliableDistance);
 					depths[0].SetData(fdepth);
+					depthframecount++;
 				}
+			}
+		}
+
+		private void AddForcesFromDepthFrame()
+		{
+			if(depthframecount > depthcount)
+			{
+				depthEffect.Parameters["SourceTexture"].SetValue(velocity.Read);
+				depthEffect.Parameters["DepthTexture"].SetValue(depths[0]);
+				depthEffect.Parameters["DepthTextureOld"].SetValue(depths[depths.Count - 1]);
+				depthEffect.Parameters["DepthSize"].SetValue(new Vector2(depths[0].Width, depths[0].Height));
+
+				SpriteBatch spriteBatch = new SpriteBatch(GraphicsDevice);
+				Rectangle r = new Rectangle(0, 0, w, h);
+
+				// update velocity with depth info
+				GraphicsDevice.SetRenderTarget(velocity.Write);
+				spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque, null, null, null, depthEffect);
+				spriteBatch.Draw(Game1.textureWhite, r, Color.White);
+				spriteBatch.End();
+				GraphicsDevice.SetRenderTarget(null);
+				velocity.Swap();
 			}
 		}
 
@@ -185,47 +215,42 @@ namespace Silhouette1
 			{
 				if(bodyFrame != null)
 				{
-					if(this.bodies == null)
-					{
-						this.bodies = new Body[bodyFrame.BodyCount];
-						this.lastBodies = new Body[bodyFrame.BodyCount];
-					}
-
+					this.lastBodies = this.bodies;
+					this.bodies = new Body[bodyFrame.BodyCount];
 					bodyFrame.GetAndRefreshBodyData(this.bodies);
-					AddForces(this.lastBodies, this.bodies);
-					bodyFrame.GetAndRefreshBodyData(this.lastBodies);
+					// AddForcesFromBodies(this.lastBodies, this.bodies);
 				}
 			}
 		}
 
-		private void AddForces(Body[] lastBodies, Body[] bodies)
+		private void AddForcesFromBodies()
 		{
 			if(lastBodies == null || bodies == null)
 				return;
 
 			for(int i = 0; i < bodies.Length; i++)
-				if(bodies[i].IsTracked && lastBodies[i].IsTracked)
+				if(bodies[i].IsTracked && lastBodies[i] != null && lastBodies[i].IsTracked)
 				{
 					foreach(var joint in bodies[i].Joints)
-						if(joint.Key == JointType.HandLeft)
+						// if(joint.Key == JointType.HandLeft)
 						{
 							Vector2 c = ConvertJoint(joint.Value.Position);
 							Joint lastJoint = lastBodies[i].Joints[joint.Key];
 							Vector2 o = ConvertJoint(lastJoint.Position);
 
-							float f = 50.0f;
+							float f = 10.0f;
 							Vector3 force = new Vector3( (c-o)*f, 0.0f);
-							Vector2 point = c;
+							Vector2 point = o;
 
-							this.splat.Render(GraphicsDevice, this.velocity, force, point, 10f, this.velocity);
+							this.splat.Render(GraphicsDevice, this.velocity, force, point, 4f, this.velocity);
 							this.boundary.Render(GraphicsDevice, this.velocity, -1, this.velocity);
-							this.splat.Render(GraphicsDevice, this.density, this.source, point, 10f, this.density);
+							this.splat.Render(GraphicsDevice, this.density, this.source, point, 4f, this.density);
 						}
 				}
 		}  
 
 		Vector2 ConvertJoint(CameraSpacePoint j) {
-			float x = ((0.1f + j.X) * w / 2 + w / 2);
+			float x = ((0.1f - j.X) * w / 2 + w / 2);
 			float y = ((0.1f - j.Y) * h / 2 + h / 2);
 			return new Vector2(x,y);
 		}
@@ -299,7 +324,9 @@ namespace Silhouette1
 			this.advect.dissipation = temp;
 			this.advect.Render(GraphicsDevice, this.velocity, this.density, this.density);
 
-			AddForces();
+			// AddForcesFromDepthFrame();
+			AddForcesFromMouse();
+			AddForcesFromBodies();
 
 			// vorticity
 			this.vorticity.Render(GraphicsDevice, this.velocity, this.velocityVorticity);
@@ -326,19 +353,10 @@ namespace Silhouette1
 			//}
 
 			display.Parameters["ScreenTexture"].SetValue(density.Read);
-			if(depths.Count > 0) {
-				display.Parameters["DepthTexture"].SetValue(depths[0]);
-				display.Parameters["DepthTextureOld"].SetValue(depths[depths.Count-1]);
-				display.Parameters["DepthSize"].SetValue(new Vector2(depths[0].Width, depths[0].Height));
-			}
-
-			Matrix projection = Matrix.CreateOrthographicOffCenter(0, 
-					GraphicsDevice.Viewport.Width, GraphicsDevice.Viewport.Height, 0, 0, 1);
-			Matrix halfPixelOffset = Matrix.CreateTranslation(-0.5f, -0.5f, 0);
-			display.Parameters["MatrixTransform"].SetValue(halfPixelOffset * projection);
 
 			SpriteBatch spriteBatch = new SpriteBatch(GraphicsDevice);
 			Rectangle r = new Rectangle(0, 0, w, h);
+
 			spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque, null, null, null, display);
 			spriteBatch.Draw(textureWhite, r, Color.White);
 			spriteBatch.End();
@@ -346,7 +364,19 @@ namespace Silhouette1
 			GraphicsDevice.Textures[2] = null;
 			GraphicsDevice.Textures[3] = null;
 
+			ChangeColor();
+
 			base.Draw(gameTime);
+		}
+
+		private void ChangeColor()
+		{
+			System.Drawing.Color color = (System.Drawing.Color)new HSLColor(hue,1.0,0.5); 
+			this.source = new Vector3( color.R / 255.0f, color.G / 255.0f, color.B / 255.0f);
+			hue += 0.01f;
+			if(hue > 1.0) {
+				hue = 0.0f;
+			}
 		}
 
 		private void Project()
@@ -366,7 +396,7 @@ namespace Silhouette1
             this.boundary.Render(GraphicsDevice, this.velocity, -1, this.velocity);
 		}
 
-		private void AddForces()
+		private void AddForcesFromMouse()
 		{
 			float f = 1000f;
 			MouseState state = Mouse.GetState();
@@ -384,12 +414,6 @@ namespace Silhouette1
 			}
 			lastmx = state.X;
 			lastmy = state.Y;
-			System.Drawing.Color color = (System.Drawing.Color)new HSLColor(hue,1.0,0.5); 
-			this.source = new Vector3( color.R / 255.0f, color.G / 255.0f, color.B / 255.0f);
-			hue += 0.01f;
-			if(hue > 1.0) {
-				hue = 0.0f;
-			}
 		}
 
 		private void DrawBordersMarkers()
